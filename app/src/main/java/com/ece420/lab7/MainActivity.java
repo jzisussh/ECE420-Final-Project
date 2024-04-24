@@ -84,8 +84,8 @@ public class MainActivity extends AppCompatActivity implements CameraBridgeViewB
 
     private int opencv_loaded_flag = -1;
     private int start_flag = -1;
-    private int transWidth = 480;
-    private int transHeight = 480;
+    private int transWidth = 600;
+    private int transHeight = 600;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -316,6 +316,7 @@ public class MainActivity extends AppCompatActivity implements CameraBridgeViewB
                             Imgproc.matchTemplate(croppedImage, template, result, Imgproc.TM_CCOEFF_NORMED);
                             Core.MinMaxLocResult mmr = Core.minMaxLoc(result);
                             double maxVal = mmr.maxVal;
+                            Log.d("Max Match", "Match Pairs"+ maxVal );
 
                             // Store the result along with the index of the template
                             Matches.add(new Pair<>(num, maxVal));
