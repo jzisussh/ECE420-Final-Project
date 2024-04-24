@@ -3,14 +3,17 @@ package com.ece420.lab7;
 import static org.opencv.imgproc.Imgproc.Canny;
 import static org.opencv.imgproc.Imgproc.findContours;
 
+import android.content.Context;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.Manifest;
+import android.content.res.AssetManager;
 import android.os.Bundle;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
+import android.util.Pair;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.Button;
@@ -30,9 +33,12 @@ import org.opencv.android.OpenCVLoader;
 import org.opencv.core.Core;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
+import org.opencv.core.MatOfByte;
 import org.opencv.core.Point;
+import org.opencv.core.Rect;
 import org.opencv.core.Rect2d;
 import org.opencv.core.Scalar;
+import org.opencv.imgcodecs.Imgcodecs;
 import org.opencv.imgproc.Imgproc;
 import org.opencv.text.Text;
 import org.opencv.tracking.TrackerKCF;
@@ -43,6 +49,8 @@ import org.opencv.core.MatOfPoint2f;
 import org.opencv.android.Utils;
 
 import java.io.Console;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -59,6 +67,9 @@ public class MainActivity extends AppCompatActivity implements CameraBridgeViewB
     private Button startButton;
     private Button captureButton;
 
+    // 2D array to store references to all TextViews
+    private TextView[][] textViewArray = new TextView[4][4];
+
     // Declare OpenCV based camera view base
     private CameraBridgeViewBase mOpenCvCameraView;
     // Camera size
@@ -69,11 +80,12 @@ public class MainActivity extends AppCompatActivity implements CameraBridgeViewB
     private Mat mRgba;
     private Mat mGray;
     private Mat transformRgba;
+    private Mat transformGray;
 
     private int opencv_loaded_flag = -1;
     private int start_flag = -1;
-    private int transWidth = 400;
-    private int transHeight = 400;
+    private int transWidth = 480;
+    private int transHeight = 480;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -96,6 +108,25 @@ public class MainActivity extends AppCompatActivity implements CameraBridgeViewB
 
         // Setup start button
         startButton = (Button) findViewById((R.id.startButton));
+
+        // Setup the output matrix table
+        // Retrieve references to all TextViews
+        textViewArray[0][0] = (TextView) findViewById(R.id.A00);
+        textViewArray[0][1] = (TextView) findViewById(R.id.A01);
+        textViewArray[0][2] = (TextView) findViewById(R.id.A02);
+        textViewArray[0][3] = (TextView) findViewById(R.id.A03);
+        textViewArray[1][0] = (TextView) findViewById(R.id.A10);
+        textViewArray[1][1] = (TextView) findViewById(R.id.A11);
+        textViewArray[1][2] = (TextView) findViewById(R.id.A12);
+        textViewArray[1][3] = (TextView) findViewById(R.id.A13);
+        textViewArray[2][0] = (TextView) findViewById(R.id.A20);
+        textViewArray[2][1] = (TextView) findViewById(R.id.A21);
+        textViewArray[2][2] = (TextView) findViewById(R.id.A22);
+        textViewArray[2][3] = (TextView) findViewById(R.id.A23);
+        textViewArray[3][0] = (TextView) findViewById(R.id.A30);
+        textViewArray[3][1] = (TextView) findViewById(R.id.A31);
+        textViewArray[3][2] = (TextView) findViewById(R.id.A32);
+        textViewArray[3][3] = (TextView) findViewById(R.id.A33);
         startButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -119,7 +150,7 @@ public class MainActivity extends AppCompatActivity implements CameraBridgeViewB
         ///////////////////////////////// Start of functions ///////////////////////////////////////////////////////
                 // Canny Edge Detection
                 Mat edges = new Mat();
-                Imgproc.Canny(mGray, edges, 50, 150, 7, false);
+                Imgproc.Canny(mGray, edges, 50, 150, 5, false);
 
                 // Contour detection
                 List<MatOfPoint> contours = new ArrayList<>();
@@ -226,8 +257,13 @@ public class MainActivity extends AppCompatActivity implements CameraBridgeViewB
                 };
                 pts_src.fromArray(corner_points_array);
 
-                // Perspective transform
+                // Perspective transform matrix
                 Mat perspective_matrix = Imgproc.getPerspectiveTransform(pts_src, new MatOfPoint2f(pts_dst));
+
+                // Perspective transform to grayscale image for the next step processing
+                Imgproc.warpPerspective(mGray, transformGray, perspective_matrix, new Size(transWidth, transHeight));
+
+                // Perspective transform to RGB image for display
                 Imgproc.warpPerspective(mRgba, transformRgba, perspective_matrix, new Size(transWidth, transHeight));
 
                 // Image View on app
@@ -236,85 +272,97 @@ public class MainActivity extends AppCompatActivity implements CameraBridgeViewB
                 Utils.matToBitmap(transformRgba, bitmap);
                 imageView.setImageBitmap(bitmap);
 
+
+                // Obtain the Context instance associated with the clicked view
+                Context context = v.getContext();
+                // Load the screenList
+                List<Pair<Integer, Mat>> screenList = TemplateLoader.loadTemplates(context);
+                Log.d("Templates", "template images" + screenList);
+
+                ///////////////////// Image cropping and Digit recognition /////////////
+                // Crop the transformed gray image into 16 small images and recognize digits in each small image
+                int rows = 4;
+                int cols = 4;
+                int HEIGHT = transHeight / rows;
+                int WIDTH =  transWidth / cols;
+
+                int [][] matrix = new int[rows][cols];
+
+                for (int row = 0; row < rows; row++) {
+                    for (int col = 0; col < cols; col++) {
+                        // Calculate ROI coordinates
+                        int x = col * WIDTH;
+                        int y = row * HEIGHT;
+                        int roiWidth = (col == cols - 1) ? transWidth - x : WIDTH;
+                        int roiHeight = (row == rows - 1) ? transHeight - y : HEIGHT;
+
+                        Rect roi = new Rect(x, y, roiWidth, roiHeight);
+                        Mat croppedImage = new Mat(transformGray, roi.clone()); // Clone the ROI to ensure independence
+                        Log.d("debug", "reach line 279" );
+                        Log.d("CroppedImage", "croppedImage" + croppedImage);
+
+                        //############# Digit Recogntition ##########//
+//                        List<Pair<Integer, Mat>> results = new ArrayList<>();
+
+                        //create a list containing all the matched digit images and corresponding value
+                        List<Pair<Integer, Double>> Matches = new ArrayList<>();
+
+                        // Now you can use the loaded screenList as needed
+                        // For example, you can iterate over the list and print the values
+                        for (Pair<Integer, Mat> pair : screenList) {
+                            int num = pair.first;
+                            Mat template = pair.second;
+                            Mat result = new Mat();
+                            Imgproc.matchTemplate(croppedImage, template, result, Imgproc.TM_CCOEFF_NORMED);
+                            Core.MinMaxLocResult mmr = Core.minMaxLoc(result);
+                            double maxVal = mmr.maxVal;
+
+                            // Store the result along with the index of the template
+                            Matches.add(new Pair<>(num, maxVal));
+                        }
+
+                        // Find the index of the template with the highest maximum value
+                        int bestIndex = -1;
+                        double maxVal = 0.0;
+
+                        Log.d("Matches", "Match Pairs"+Matches );
+
+                        for (Pair<Integer, Double> Match : Matches) {
+                            if (Match.second > maxVal) {
+                                maxVal = Match.second;
+                                bestIndex = Match.first;
+                            }
+                        }
+
+                        // Return the recognized value (template index + 1), or 0 if recognition fails
+                        int digit = (maxVal >= 0.5) ? (bestIndex ) : 0;
+                        // Perform recognition on the cropped image
+//                        int result = recognize(croppedImage, ScreenList);
+
+                        // add to the matrix
+                        matrix[row][col] = digit;
+
+                    }
+                }
+                Log.d("matrix", "matrix"+matrix );
+
+                // Display the output matrix in the table UI
+                // Iterate through the matrix and set the corresponding digit to each TextView
+                for (int i = 0; i < 4; i++) {
+                    for (int j = 0; j < 4; j++) {
+                        textViewArray[i][j].setText(String.valueOf(matrix[i][j]));
+                    }
+                }
+
+
+                ///////////////////// End of Image cropping and Digit recognition /////////////
+
                 // Release memory
                 edges.release();
                 hierarchy.release();
                 hull.release();
+
             }
-//      ################################# Contour Detection and Perspecive Transform ###########################################
-//                Mat edges = new Mat();
-//                Imgproc.Canny(mGray, edges,5, 15, 7, false);
-//
-//                List<MatOfPoint> contours = new ArrayList<>();
-//                Mat hierarchy = new Mat();
-//                Imgproc.findContours(edges, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
-//                MatOfPoint outerContour = null;
-//                double maxArea = -1;
-//                for (MatOfPoint contour : contours) {
-//                    double area = Imgproc.contourArea(contour);
-//                    if (area > maxArea) {
-//                        maxArea = area;
-//                        outerContour = contour;
-//                    }
-//                }
-//
-//                MatOfInt hull = new MatOfInt();
-//                Imgproc.convexHull(outerContour, hull);
-//
-//                Point[] hullPoints = new Point[hull.rows()];
-//                for (int i = 0; i < hull.rows(); i++) {
-//                    int index = (int) hull.get(i, 0)[0];
-//                    hullPoints[i] = outerContour.toArray()[index];
-//                }
-//
-//                Point topLeft = hullPoints[0];
-//                Point topRight = hullPoints[0];
-//                Point bottomLeft = hullPoints[0];
-//                Point bottomRight = hullPoints[0];
-//                for (Point point : hullPoints) {
-//                    if (point.x + point.y < topLeft.x + topLeft.y) topLeft = point;
-//                    if (point.x - point.y > topRight.x - topRight.y) topRight = point;
-//
-//                    if (point.x - point.y < bottomLeft.x - bottomLeft.y) bottomLeft = point;
-//                    if (point.x + point.y > bottomRight.x + bottomRight.y) bottomRight = point;
-//                }
-//
-//                // Create point source and point destination
-//                Point[] pts_dst = new Point[]{
-//                        new Point(0, 0),
-//                        new Point(transWidth - 1, 0),
-//                        new Point(transWidth - 1, transHeight - 1),
-//                        new Point(0, transHeight - 1)
-//                };
-//                MatOfPoint2f pts_src = new MatOfPoint2f();
-//                Point[] corner_points_array = new Point[]{
-//                        topLeft,
-//                        topRight,
-//                        bottomRight,
-//                        bottomLeft
-//                };
-//                pts_src.fromArray(corner_points_array);
-//
-//                Log.d("coord topleft", "(" + topLeft.x + "," + topLeft.y + ")");
-//                Log.d("coord topright", "(" + topRight.x + "," + topRight.y + ")");
-//                Log.d("coord botleft", "(" + bottomLeft.x + "," + bottomLeft.y + ")");
-//                Log.d("coord botright", "(" + bottomRight.x + "," + bottomRight.y + ")");
-//
-//                // Perspective transform
-//                Mat perspective_matrix = Imgproc.getPerspectiveTransform(pts_src, new MatOfPoint2f(pts_dst));
-//                Imgproc.warpPerspective(mRgba, transformRgba, perspective_matrix, new Size(transWidth, transHeight));
-//
-//                // Image View on app
-//                ImageView imageView = (ImageView) findViewById(R.id.transformView);
-//                Bitmap bitmap = Bitmap.createBitmap(transformRgba.cols(), transformRgba.rows(), Bitmap.Config.ARGB_8888);
-//                Utils.matToBitmap(transformRgba, bitmap);
-//                imageView.setImageBitmap(bitmap);
-//
-//                // Release Memory
-//                edges.release();
-//                hierarchy.release();
-//                hull.release();
-//            }
 
         });
         //////////////////////  End of Functions ////////////////////////////////////////////////////////////////////////////
@@ -378,6 +426,7 @@ public class MainActivity extends AppCompatActivity implements CameraBridgeViewB
     public void onCameraViewStarted(int width, int height) {
         mRgba = new Mat(height, width, CvType.CV_8UC4);
         mGray = new Mat(height, width, CvType.CV_8UC1);
+        transformGray = new Mat(transWidth, transHeight, CvType.CV_8UC1);
         transformRgba = new Mat(transWidth, transHeight, CvType.CV_8UC4);
         myWidth = width;
         myHeight = height;
@@ -389,6 +438,7 @@ public class MainActivity extends AppCompatActivity implements CameraBridgeViewB
     public void onCameraViewStopped() {
         mRgba.release();
         mGray.release();
+        transformGray.release();
         transformRgba.release();
     }
 

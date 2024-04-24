@@ -17,6 +17,13 @@ android {
         }
     }
     namespace "com.ece420.lab7"
+    sourceSets {
+        main {
+            assets {
+                srcDirs 'src\\main\\assets'
+            }
+        }
+    }
 }
 
 dependencies {
